@@ -55,6 +55,54 @@ function shuffled(list) {
   return a;
 }
 
+// ---- Display anlassen (Screen Wake Lock) ----
+// Rückgabe: "an" (Display bleibt an), "aus" (nicht aktiv) oder "nicht-moeglich" (Gerät/Browser unterstützt es nicht)
+function useWakeLock(active) {
+  const supported = typeof navigator !== "undefined" && "wakeLock" in navigator;
+  const [status, setStatus] = useState("aus");
+
+  useEffect(() => {
+    if (!active) return undefined;
+    if (!supported) return undefined;
+    let lock = null;
+    let cancelled = false;
+
+    async function request() {
+      if (lock && !lock.released) return;
+      try {
+        const sentinel = await navigator.wakeLock.request("screen");
+        if (cancelled) {
+          sentinel.release().catch(() => {});
+          return;
+        }
+        lock = sentinel;
+        setStatus("an");
+        sentinel.addEventListener("release", () => {
+          if (!cancelled) setStatus("aus");
+        });
+      } catch {
+        // z. B. Energiesparmodus: Display geht dann normal aus
+        if (!cancelled) setStatus("aus");
+      }
+    }
+    function onVisible() {
+      // Beim Zurückkehren in die App wird die Sperre vom System aufgehoben, daher neu anfordern
+      if (document.visibilityState === "visible") request();
+    }
+
+    request();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      if (lock) lock.release().catch(() => {});
+    };
+  }, [active, supported]);
+
+  if (!supported) return "nicht-moeglich";
+  return active ? status : "aus";
+}
+
 export default function Stockheil() {
   const [screen, setScreen] = usePersistentState("screen", "start", (s) => (["start", "kehre", "ende"].includes(s) ? s : "start"));
   // Menüs (Setup, Verlauf) liegen über dem Match und werden nicht gespeichert
@@ -82,6 +130,8 @@ export default function Stockheil() {
   const baseScreen = screen === "ende" && !ended ? "start" : screen;
   const activeScreen = menu ?? baseScreen;
   const totalStones = stonesPerTeam * 2;
+  // Display bleibt während des laufenden Matches an
+  const displayStatus = useWakeLock(baseScreen === "kehre");
 
   // ---- Punktelogik ----
   const kehreScore = useMemo(() => {
@@ -303,7 +353,7 @@ export default function Stockheil() {
 
         {activeScreen === "kehre" && (
           <KehreScreen
-            {...{ nameA, nameB, game, targetPoints, kehreScore, totalStones, card, bigBtn }}
+            {...{ nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, card, bigBtn }}
             kannKorrigieren={snapshots.length > 0}
             addStone={addStone}
             undoStone={undoStone}
@@ -567,7 +617,7 @@ function Stepper({ label, value, setValue, min, max }) {
   );
 }
 
-function KehreScreen({ nameA, nameB, game, targetPoints, kehreScore, totalStones, kannKorrigieren, addStone, undoStone, auswerten, korrigiereLetzteKehre, beendeManuell, card, bigBtn }) {
+function KehreScreen({ nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, kannKorrigieren, addStone, undoStone, auswerten, korrigiereLetzteKehre, beendeManuell, card, bigBtn }) {
   const [confirmEnd, setConfirmEnd] = useState(false);
   const stones = game.stones;
   const tile = { height: 110, width: "100%", boxSizing: "border-box", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" };
@@ -652,6 +702,12 @@ function KehreScreen({ nameA, nameB, game, targetPoints, kehreScore, totalStones
           </div>
         </div>
       )}
+
+      <div style={{ textAlign: "center", fontSize: 12, color: "#7a6a5a" }}>
+        {displayStatus === "an" && "☀ Display bleibt an"}
+        {displayStatus === "aus" && "Display-Timeout des Handys gilt"}
+        {displayStatus === "nicht-moeglich" && "Display anlassen wird hier nicht unterstützt"}
+      </div>
     </div>
   );
 }
