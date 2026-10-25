@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { Shuffle, RotateCcw, Check, Trophy, Flag, Plus, Minus, X, Trash2, History, Lock, Unlock, Settings, Undo2 } from "lucide-react";
+import { Shuffle, RotateCcw, Check, Trophy, Flag, Plus, Minus, X, Trash2, History, Lock, Unlock, Settings, Undo2, Share2 } from "lucide-react";
+import { APP_URL, QR_SIZE, QR_PATH } from "./qr.js";
 
 // ---- Flitzepfeil-Farbpalette ----
 const COLORS = {
@@ -588,8 +589,100 @@ function SetupScreen({ stonesPerTeam, setStonesPerTeam, targetPoints, setTargetP
         )}
       </div>
 
+      <ShareCard card={card} bigBtn={bigBtn} sectionTitle={sectionTitle} />
+
       <button onClick={onFertig} style={{ ...bigBtn(COLORS.green), width: "100%" }}>Fertig</button>
     </div>
+  );
+}
+
+// ---- App weitergeben: QR-Code + Link teilen ----
+function QrBild({ size }) {
+  const quiet = 4; // Ruhezone um den Code, damit Kameras ihn sicher erkennen
+  const total = QR_SIZE + quiet * 2;
+  return (
+    <svg
+      viewBox={`${-quiet} ${-quiet} ${total} ${total}`}
+      role="img"
+      aria-label="QR-Code zur Stockheil-App"
+      shapeRendering="crispEdges"
+      style={{ width: size, height: size, display: "block", borderRadius: 12 }}
+    >
+      <rect x={-quiet} y={-quiet} width={total} height={total} fill="#fff" />
+      <path d={QR_PATH} fill="#000" />
+    </svg>
+  );
+}
+
+function ShareCard({ card, bigBtn, sectionTitle }) {
+  const [gross, setGross] = useState(false);
+  const [hinweis, setHinweis] = useState("");
+
+  async function teilen() {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Stockheil", text: "Stockheil: Moarschafts-Wertung für Eisstockschießen", url: APP_URL });
+      } catch {
+        // Teilen abgebrochen: nichts zu tun
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(APP_URL);
+      setHinweis("Link kopiert");
+    } catch {
+      setHinweis("Kopieren nicht möglich");
+    }
+    setTimeout(() => setHinweis(""), 2500);
+  }
+
+  return (
+    <div style={card}>
+      <div style={sectionTitle}>APP WEITERGEBEN</div>
+      <div style={{ fontSize: 13, color: "#7a6a5a", marginBottom: 12 }}>
+        Zum Scannen mit der Handykamera. Antippen vergrößert den Code.
+      </div>
+      <button onClick={() => setGross(true)} aria-label="QR-Code vergrößern" style={{ border: `1px solid ${COLORS.greenSoft}`, background: "#fff", borderRadius: 14, padding: 8, display: "block", margin: "0 auto", touchAction: "manipulation" }}>
+        <QrBild size={190} />
+      </button>
+      <div style={{ textAlign: "center", fontSize: 13, color: COLORS.brown, fontWeight: 700, marginTop: 10, wordBreak: "break-all" }}>{APP_URL}</div>
+      <button onClick={teilen} style={{ ...bigBtn(COLORS.purple), width: "100%", marginTop: 12, fontSize: 16, padding: "14px 10px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <Share2 size={20} /> Link teilen
+      </button>
+      <div style={{ textAlign: "center", fontSize: 13, color: COLORS.green, fontWeight: 700, minHeight: 18, marginTop: 8 }}>{hinweis}</div>
+      <div style={{ fontSize: 12, color: "#7a6a5a", marginTop: 4, lineHeight: 1.5 }}>
+        Installieren: Android (Chrome) Menü ⋮ → „App installieren". iPhone (Safari) Teilen → „Zum Home-Bildschirm".
+      </div>
+
+      {gross && <QrVollbild onClose={() => setGross(false)} />}
+    </div>
+  );
+}
+
+// Vollbild-QR-Code zum Scannen durch andere (auch während des Matches erreichbar)
+function QrVollbild({ onClose }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "#fff", zIndex: 900, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, padding: 16, boxSizing: "border-box" }}
+    >
+      <div style={{ color: COLORS.green, fontWeight: 900, fontSize: 24 }}>STOCKHEIL</div>
+      <QrBild size="min(86vw, 70vh, 460px)" />
+      <div style={{ color: COLORS.brown, fontWeight: 700, fontSize: 14, textAlign: "center", wordBreak: "break-all" }}>{APP_URL}</div>
+      <div style={{ color: "#7a6a5a", fontSize: 13 }}>Zum Schließen irgendwo tippen</div>
+    </div>
+  );
+}
+
+// Kleines QR-Symbol (ohne Icon-Bibliothek gezeichnet)
+function QrSymbol({ size = 26, color = "currentColor" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <path d="M14 14h3v3h-3zM20 14v1M14 20h1M18 18h3v3h-3z" />
+    </svg>
   );
 }
 
@@ -619,6 +712,7 @@ function Stepper({ label, value, setValue, min, max }) {
 
 function KehreScreen({ nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, kannKorrigieren, addStone, undoStone, auswerten, korrigiereLetzteKehre, beendeManuell, card, bigBtn }) {
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [qrOffen, setQrOffen] = useState(false);
   const stones = game.stones;
   const tile = { height: 110, width: "100%", boxSizing: "border-box", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" };
 
@@ -686,9 +780,15 @@ function KehreScreen({ nameA, nameB, game, targetPoints, kehreScore, totalStones
       )}
 
       {!confirmEnd ? (
-        <button onClick={() => setConfirmEnd(true)} style={{ border: "none", background: "transparent", color: "#a33", fontSize: 13, marginTop: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: 10 }}>
-          <Flag size={14} /> Match jetzt beenden
-        </button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+          <button onClick={() => setQrOffen(true)} aria-label="QR-Code zum Weitergeben der App anzeigen" style={{ width: 48, height: 48, flexShrink: 0, border: `1px solid ${COLORS.greenSoft}`, background: "#fff", color: COLORS.green, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", touchAction: "manipulation" }}>
+            <QrSymbol />
+          </button>
+          <button onClick={() => setConfirmEnd(true)} style={{ border: "none", background: "transparent", color: "#a33", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: 10 }}>
+            <Flag size={14} /> Match jetzt beenden
+          </button>
+          <div style={{ width: 48, flexShrink: 0 }} />
+        </div>
       ) : (
         <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ color: COLORS.brown, fontWeight: 700, fontSize: 14, textAlign: "center" }}>Match wirklich beenden?</div>
@@ -708,6 +808,8 @@ function KehreScreen({ nameA, nameB, game, targetPoints, kehreScore, totalStones
         {displayStatus === "aus" && "Display-Timeout des Handys gilt"}
         {displayStatus === "nicht-moeglich" && "Display anlassen wird hier nicht unterstützt"}
       </div>
+
+      {qrOffen && <QrVollbild onClose={() => setQrOffen(false)} />}
     </div>
   );
 }
