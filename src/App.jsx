@@ -19,6 +19,92 @@ const MAX_SAVED_NAMES = 24;
 const INITIAL_GAME = { kehreNr: 1, raw: { A: 0, B: 0 }, kp: { A: 0, B: 0 }, stones: [] };
 const STORAGE_PREFIX = "stockheil:";
 
+// ---- Wertungslogik (reine Funktionen, ohne React) ----
+// Die Stöcke einer Kehre werden der Reihe nach von der Daube weg angetippt. Gezählt wird die
+// ununterbrochene Serie einer Moarschaft ab dem nächsten Stock.
+//
+// Wild: Jede Stufe der Serie bringt ihren Wert (steps). Die Punkte werden über die Kehren gesammelt.
+//       Bei 9 gibt es einen Kehrenpunkt, danach beginnen beide Moarschaften wieder bei 0.
+// Olympisch (IER 451/452): Jeder Stock der Serie zählt 1 Punkt, die Stockpunkte werden über alle
+//       Kehren summiert. Spielpunkte: Sieg 2:0, Unentschieden 1:1 (IER 454).
+const WILD_ZIEL = 9;
+const WILD_VARIANTEN = {
+  "3-6-9": { steps: [3, 3, 3], text: "Nächster Stock 3, zweiter 6, dritter 9 Punkte." },
+  "3-2-2-2": { steps: [3, 2, 2, 2], text: "Nächster Stock 3, jeder weitere 2 dazu (3, 5, 7, 9). Für die 9 braucht es vier Stöcke." },
+  "6-9": { steps: [6, 3], text: "Nächster Stock 6, zweiter 9 Punkte." },
+};
+const STANDARD_VARIANTE = "3-6-9";
+
+function bewerteKehre({ stones, raw, modus, variante, stonesPerTeam }) {
+  if (stones.length === 0) return { A: 0, B: 0, complete: false };
+  const totalStones = stonesPerTeam * 2;
+  const first = stones[0];
+  let count = 0;
+  for (const t of stones) {
+    if (t === first) count++;
+    else break;
+  }
+  let pts;
+  let maxCountable;
+  let reichtSchon = false;
+  if (modus === "olympisch") {
+    maxCountable = stonesPerTeam;
+    pts = Math.min(count, maxCountable);
+  } else {
+    const steps = (WILD_VARIANTEN[variante] || WILD_VARIANTEN[STANDARD_VARIANTE]).steps;
+    maxCountable = Math.min(steps.length, stonesPerTeam);
+    pts = steps.slice(0, Math.min(count, maxCountable)).reduce((sum, st) => sum + st, 0);
+    reichtSchon = raw[first] + pts >= WILD_ZIEL;
+  }
+  const broken = stones.length > count;
+  const capped = count >= maxCountable;
+  const allIn = stones.length === totalStones;
+  return {
+    A: first === "A" ? pts : 0,
+    B: first === "B" ? pts : 0,
+    complete: broken || capped || allIn || reichtSchon,
+  };
+}
+
+// Wertet eine fertige Kehre in den Spielstand ein. Rückgabe: neuer Stand und Sieger (null = läuft weiter).
+// Stand: raw = Wild: laufende Punkte Richtung 9 / Olympisch: Stockpunkte gesamt
+//        kp  = Wild: Kehrenpunkte / Olympisch: gewonnene Kehren
+function wendeKehreAn({ game, kehre, modus, targetPoints, kehrenZahl }) {
+  const raw = { A: game.raw.A + kehre.A, B: game.raw.B + kehre.B };
+  const kp = { ...game.kp };
+  let winner = null;
+  if (modus === "olympisch") {
+    if (kehre.A > kehre.B) kp.A += 1;
+    if (kehre.B > kehre.A) kp.B += 1;
+    if (game.kehreNr >= kehrenZahl) winner = raw.A === raw.B ? "unentschieden" : raw.A > raw.B ? "A" : "B";
+    return { game: { kehreNr: game.kehreNr + 1, raw, kp, stones: [] }, winner };
+  }
+  let punktErreicht = false;
+  ["A", "B"].forEach((t) => {
+    if (raw[t] >= WILD_ZIEL) {
+      kp[t] += 1;
+      punktErreicht = true;
+      raw.A = 0;
+      raw.B = 0;
+      if (kp[t] >= targetPoints) winner = t;
+    }
+  });
+  return { game: { kehreNr: punktErreicht ? 1 : game.kehreNr + 1, raw, kp, stones: [] }, winner };
+}
+
+function spielpunkte(winner) {
+  if (winner === "A") return { A: 2, B: 0 };
+  if (winner === "B") return { A: 0, B: 2 };
+  return { A: 1, B: 1 };
+}
+
+function modusText(m) {
+  if (m.modus === "olympisch") return `Olympisch, Spielpunkte ${m.spielA}:${m.spielB}`;
+  if (m.modus === "wild") return `Wild ${m.variante || ""}`.trim();
+  return "";
+}
+// ---- Ende Wertungslogik ----
+
 function formatDate(d) {
   return new Date(d).toLocaleString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
@@ -115,6 +201,9 @@ export default function Stockheil() {
   const [savedNames, setSavedNames] = usePersistentState("savedNames", DEFAULT_SAVED_NAMES);
   const [stonesPerTeam, setStonesPerTeam] = usePersistentState("stonesPerTeam", 4);
   const [targetPoints, setTargetPoints] = usePersistentState("targetPoints", 6);
+  const [modus, setModus] = usePersistentState("modus", "wild", (m) => (m === "olympisch" ? "olympisch" : "wild"));
+  const [variante, setVariante] = usePersistentState("variante", STANDARD_VARIANTE, (v) => (typeof v === "string" && Object.prototype.hasOwnProperty.call(WILD_VARIANTEN, v) ? v : STANDARD_VARIANTE));
+  const [kehrenZahl, setKehrenZahl] = usePersistentState("kehrenZahl", 6, (n) => (Number.isInteger(n) && n >= 2 && n <= 12 && n % 2 === 0 ? n : 6));
 
   const [game, setGame] = usePersistentState("game", INITIAL_GAME);
   const [snapshots, setSnapshots] = usePersistentState("snapshots", []);
@@ -135,27 +224,10 @@ export default function Stockheil() {
   const displayStatus = useWakeLock(baseScreen === "kehre");
 
   // ---- Punktelogik ----
-  const kehreScore = useMemo(() => {
-    const stones = game.stones;
-    if (stones.length === 0) return { A: 0, B: 0, complete: false };
-    const first = stones[0];
-    let count = 0;
-    for (const t of stones) {
-      if (t === first) count++;
-      else break;
-    }
-    const pts = Math.min(count, 3) * 3;
-    const maxCountable = Math.min(3, totalStones);
-    const broken = stones.length > count;
-    const capped = count === maxCountable;
-    const allIn = stones.length === totalStones;
-    const reichtSchon = game.raw[first] + pts >= 9;
-    return {
-      A: first === "A" ? pts : 0,
-      B: first === "B" ? pts : 0,
-      complete: broken || capped || allIn || reichtSchon,
-    };
-  }, [game.stones, game.raw, totalStones]);
+  const kehreScore = useMemo(
+    () => bewerteKehre({ stones: game.stones, raw: game.raw, modus, variante, stonesPerTeam }),
+    [game.stones, game.raw, modus, variante, stonesPerTeam]
+  );
 
   function addStone(team) {
     if (kehreScore.complete) return;
@@ -165,34 +237,33 @@ export default function Stockheil() {
     setGame({ ...game, stones: game.stones.slice(0, -1) });
   }
 
-  function speichereMatch(id, scoreA, scoreB, siegerName) {
+  function speichereMatch(id, scoreA, scoreB, siegerName, extra = {}) {
     setMatchHistory((h) => [
-      { id, date: new Date().toISOString(), teamA: nameA, teamB: nameB, scoreA, scoreB, sieger: siegerName },
+      { id, date: new Date().toISOString(), teamA: nameA, teamB: nameB, scoreA, scoreB, sieger: siegerName, ...extra },
       ...h,
     ]);
   }
 
+  // Ergebnis im Verlauf ablegen (Wild: Kehrenpunkte, Olympisch: Stockpunkte plus Spielpunkte)
+  function speichereErgebnis(id, endStand, winner) {
+    const siegerName = winner === "A" ? nameA : winner === "B" ? nameB : null;
+    if (modus === "olympisch") {
+      const sp = spielpunkte(winner);
+      speichereMatch(id, endStand.raw.A, endStand.raw.B, siegerName, { modus: "olympisch", spielA: sp.A, spielB: sp.B, kehrenA: endStand.kp.A, kehrenB: endStand.kp.B });
+    } else {
+      speichereMatch(id, endStand.kp.A, endStand.kp.B, siegerName, { modus: "wild", variante });
+    }
+  }
+
   function auswerten() {
-    const newRaw = { A: game.raw.A + kehreScore.A, B: game.raw.B + kehreScore.B };
-    const newKp = { ...game.kp };
-    let matchWinner = null;
-    let punktErreicht = false;
-    ["A", "B"].forEach((t) => {
-      if (newRaw[t] >= 9) {
-        newKp[t] += 1;
-        punktErreicht = true;
-        newRaw.A = 0;
-        newRaw.B = 0;
-        if (newKp[t] >= targetPoints) matchWinner = t;
-      }
-    });
+    const { game: neuerStand, winner } = wendeKehreAn({ game, kehre: kehreScore, modus, targetPoints, kehrenZahl });
     // Stand vor dieser Wertung merken, damit sie korrigiert werden kann
     setSnapshots([...snapshots, game]);
-    setGame({ kehreNr: punktErreicht ? 1 : game.kehreNr + 1, raw: newRaw, kp: newKp, stones: [] });
-    if (matchWinner) {
+    setGame(neuerStand);
+    if (winner) {
       const id = Date.now();
-      speichereMatch(id, newKp.A, newKp.B, matchWinner === "A" ? nameA : nameB);
-      setEnded({ matchId: id, auto: true, winner: matchWinner });
+      speichereErgebnis(id, neuerStand, winner);
+      setEnded({ matchId: id, auto: true, winner });
       setScreen("ende");
     }
   }
@@ -205,10 +276,10 @@ export default function Stockheil() {
   }
 
   function beendeManuell() {
-    const { A, B } = game.kp;
+    const { A, B } = modus === "olympisch" ? game.raw : game.kp;
     const winner = A === B ? "unentschieden" : A > B ? "A" : "B";
     const id = Date.now();
-    speichereMatch(id, A, B, winner === "A" ? nameA : winner === "B" ? nameB : null);
+    speichereErgebnis(id, game, winner);
     setEnded({ matchId: id, auto: false, winner });
     setScreen("ende");
   }
@@ -339,7 +410,7 @@ export default function Stockheil() {
       <div style={{ padding: 16, maxWidth: 520, margin: "0 auto" }}>
         {activeScreen === "start" && (
           <StartScreen
-            {...{ nameA, setNameA, nameB, setNameB, savedNames, stonesPerTeam, targetPoints, card, bigBtn }}
+            {...{ nameA, setNameA, nameB, setNameB, savedNames, stonesPerTeam, targetPoints, modus, variante, kehrenZahl, card, bigBtn }}
             onStart={startMatch}
             onSetup={() => oeffneMenu("setup")}
           />
@@ -347,14 +418,14 @@ export default function Stockheil() {
 
         {activeScreen === "setup" && (
           <SetupScreen
-            {...{ stonesPerTeam, setStonesPerTeam, targetPoints, setTargetPoints, savedNames, setSavedNames, merkeNamen, groupNames, setGroupNames, groups, setGroups, shuffleGroups, nameA, nameB, card, bigBtn }}
+            {...{ modus, setModus, variante, setVariante, kehrenZahl, setKehrenZahl, stonesPerTeam, setStonesPerTeam, targetPoints, setTargetPoints, savedNames, setSavedNames, merkeNamen, groupNames, setGroupNames, groups, setGroups, shuffleGroups, nameA, nameB, card, bigBtn }}
             onFertig={menueZurueck}
           />
         )}
 
         {activeScreen === "kehre" && (
           <KehreScreen
-            {...{ nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, card, bigBtn }}
+            {...{ modus, kehrenZahl, nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, card, bigBtn }}
             kannKorrigieren={snapshots.length > 0}
             addStone={addStone}
             undoStone={undoStone}
@@ -365,7 +436,7 @@ export default function Stockheil() {
         )}
 
         {activeScreen === "ende" && (
-          <EndeScreen {...{ nameA, nameB, kp: game.kp, winner: ended.winner, auto: ended.auto, card, bigBtn }} onNeu={neuesMatch} onKorrigieren={korrigiereEnde} />
+          <EndeScreen {...{ nameA, nameB, kp: modus === "olympisch" ? game.raw : game.kp, olympisch: modus === "olympisch", kehren: game.kp, winner: ended.winner, auto: ended.auto, card, bigBtn }} onNeu={neuesMatch} onKorrigieren={korrigiereEnde} />
         )}
 
         {activeScreen === "verlauf" && (
@@ -452,7 +523,7 @@ function DaubeMark() {
 }
 
 // ---- Start: nur Mannschaftsnamen + Match starten ----
-function StartScreen({ nameA, setNameA, nameB, setNameB, savedNames, stonesPerTeam, targetPoints, card, bigBtn, onStart, onSetup }) {
+function StartScreen({ nameA, setNameA, nameB, setNameB, savedNames, stonesPerTeam, targetPoints, modus, variante, kehrenZahl, card, bigBtn, onStart, onSetup }) {
   const gleich = nameA.trim() !== "" && nameA.trim().toLowerCase() === nameB.trim().toLowerCase();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -470,12 +541,44 @@ function StartScreen({ nameA, setNameA, nameB, setNameB, savedNames, stonesPerTe
       </button>
 
       <div style={{ textAlign: "center", color: "#7a6a5a", fontSize: 13 }}>
-        {stonesPerTeam} Stöcke je Moarschaft · Ziel {targetPoints} Kehrenpunkte
+        {modus === "olympisch"
+          ? `Olympisch · ${stonesPerTeam} Stöcke je Moarschaft · ${kehrenZahl} Kehren`
+          : `Wild ${variante} · ${stonesPerTeam} Stöcke je Moarschaft · Ziel ${targetPoints} Kehrenpunkte`}
       </div>
 
       <button onClick={onSetup} style={{ ...bigBtn("#e9e4d8", COLORS.brown), width: "100%", fontSize: 16, padding: "14px 10px", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
         <Settings size={20} /> Setup
       </button>
+    </div>
+  );
+}
+
+function SpielartCard({ modus, setModus, variante, setVariante, card }) {
+  const chip = (aktiv) => ({
+    border: `1px solid ${aktiv ? COLORS.green : COLORS.greenSoft}`,
+    background: aktiv ? COLORS.green : COLORS.greenSoft,
+    color: aktiv ? "#fff" : COLORS.brown,
+    borderRadius: 999, padding: "10px 16px", fontSize: 15, fontWeight: 800, touchAction: "manipulation",
+  });
+  return (
+    <div style={{ ...card, borderTop: `5px solid ${COLORS.green}` }}>
+      <div style={{ fontSize: 12, fontWeight: 800, color: "#7a6a5a", marginBottom: 8, letterSpacing: 0.5 }}>SPIELART</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <button onClick={() => setModus("olympisch")} style={chip(modus === "olympisch")}>Olympisch</button>
+        <button onClick={() => setModus("wild")} style={chip(modus === "wild")}>Wild</button>
+      </div>
+      {modus === "wild" && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+          {Object.keys(WILD_VARIANTEN).map((key) => (
+            <button key={key} onClick={() => setVariante(key)} style={chip(variante === key)}>{key}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 13, color: "#7a6a5a", marginTop: 10, lineHeight: 1.45 }}>
+        {modus === "olympisch"
+          ? "Jeder Stock, der näher liegt als der beste gegnerische, zählt 1 Punkt. Nach allen Kehren gewinnt, wer mehr Stockpunkte hat (2 Spielpunkte, bei Gleichstand je 1)."
+          : `${WILD_VARIANTEN[variante].text} Bei 9 gibt es einen Kehrenpunkt, danach beginnen beide wieder bei 0.`}
+      </div>
     </div>
   );
 }
@@ -514,7 +617,7 @@ function TeamNameCard({ label, name, setName, savedNames, color, card }) {
 }
 
 // ---- Setup-Menü: Regeln, gespeicherte Namen, Zufalls-Gruppen ----
-function SetupScreen({ stonesPerTeam, setStonesPerTeam, targetPoints, setTargetPoints, savedNames, setSavedNames, merkeNamen, groupNames, setGroupNames, groups, setGroups, shuffleGroups, nameA, nameB, card, bigBtn, onFertig }) {
+function SetupScreen({ modus, setModus, variante, setVariante, kehrenZahl, setKehrenZahl, stonesPerTeam, setStonesPerTeam, targetPoints, setTargetPoints, savedNames, setSavedNames, merkeNamen, groupNames, setGroupNames, groups, setGroups, shuffleGroups, nameA, nameB, card, bigBtn, onFertig }) {
   const [neuerName, setNeuerName] = useState("");
   const sectionTitle = { fontWeight: 800, color: COLORS.brown, marginBottom: 10, fontSize: 15 };
 
@@ -527,11 +630,17 @@ function SetupScreen({ stonesPerTeam, setStonesPerTeam, targetPoints, setTargetP
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ textAlign: "center", fontWeight: 900, fontSize: 18, color: COLORS.green }}>Setup</div>
 
+      <SpielartCard {...{ modus, setModus, variante, setVariante, card }} />
+
       <div style={card}>
         <div style={sectionTitle}>SPIELREGELN</div>
         <Stepper label="Stöcke je Moarschaft" value={stonesPerTeam} setValue={setStonesPerTeam} min={1} max={6} />
         <div style={{ height: 10 }} />
-        <Stepper label="Ziel Kehrenpunkte" value={targetPoints} setValue={setTargetPoints} min={1} max={10} />
+        {modus === "olympisch" ? (
+          <Stepper label="Kehren je Spiel" value={kehrenZahl} setValue={setKehrenZahl} min={2} max={12} step={2} />
+        ) : (
+          <Stepper label="Ziel Kehrenpunkte" value={targetPoints} setValue={setTargetPoints} min={1} max={10} />
+        )}
       </div>
 
       <div style={card}>
@@ -697,35 +806,41 @@ function GruppenListe({ titel, namen, color, textColor }) {
   );
 }
 
-function Stepper({ label, value, setValue, min, max }) {
+function Stepper({ label, value, setValue, min, max, step = 1 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
       <span style={{ color: COLORS.brown, fontSize: 15, fontWeight: 600 }}>{label}</span>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <button onClick={() => setValue(Math.max(min, value - 1))} aria-label={`${label} weniger`} style={{ width: 40, height: 40, borderRadius: 10, border: "none", background: COLORS.greenSoft, color: COLORS.green, fontSize: 18 }}><Minus size={18} /></button>
+        <button onClick={() => setValue(Math.max(min, value - step))} aria-label={`${label} weniger`} style={{ width: 40, height: 40, borderRadius: 10, border: "none", background: COLORS.greenSoft, color: COLORS.green, fontSize: 18 }}><Minus size={18} /></button>
         <span style={{ fontWeight: 900, fontSize: 20, color: COLORS.green, minWidth: 24, textAlign: "center" }}>{value}</span>
-        <button onClick={() => setValue(Math.min(max, value + 1))} aria-label={`${label} mehr`} style={{ width: 40, height: 40, borderRadius: 10, border: "none", background: COLORS.greenSoft, color: COLORS.green, fontSize: 18 }}><Plus size={18} /></button>
+        <button onClick={() => setValue(Math.min(max, value + step))} aria-label={`${label} mehr`} style={{ width: 40, height: 40, borderRadius: 10, border: "none", background: COLORS.greenSoft, color: COLORS.green, fontSize: 18 }}><Plus size={18} /></button>
       </div>
     </div>
   );
 }
 
-function KehreScreen({ nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, kannKorrigieren, addStone, undoStone, auswerten, korrigiereLetzteKehre, beendeManuell, card, bigBtn }) {
+function KehreScreen({ modus, kehrenZahl, nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, kannKorrigieren, addStone, undoStone, auswerten, korrigiereLetzteKehre, beendeManuell, card, bigBtn }) {
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [qrOffen, setQrOffen] = useState(false);
   const stones = game.stones;
+  const darfWerten = stones.length > 0 || modus === "olympisch";
   const tile = { height: 110, width: "100%", boxSizing: "border-box", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, width: "100%" }}>
-        <Scoreboard name={nameA} color={COLORS.gold} kp={game.kp.A} target={targetPoints} raw={game.raw.A} />
-        <Scoreboard name={nameB} color={COLORS.purple} kp={game.kp.B} target={targetPoints} raw={game.raw.B} />
+        <Scoreboard name={nameA} color={COLORS.gold} kp={game.kp.A} target={targetPoints} raw={game.raw.A} modus={modus} />
+        <Scoreboard name={nameB} color={COLORS.purple} kp={game.kp.B} target={targetPoints} raw={game.raw.B} modus={modus} />
       </div>
 
       <div style={{ textAlign: "center", color: COLORS.brown, fontWeight: 800, fontSize: 15 }}>
-        KEHRE {game.kehreNr} — Stock {stones.length} / {totalStones}
+        KEHRE {game.kehreNr}{modus === "olympisch" ? ` / ${kehrenZahl}` : ""} — Stock {stones.length} / {totalStones}
       </div>
+      {modus === "olympisch" && stones.length === 0 && (
+        <div style={{ textAlign: "center", fontSize: 12, color: "#7a6a5a", marginTop: -6 }}>
+          Stöcke der Reihe nach von der Daube weg antippen. Bei gleicher Entfernung oder ohne Stock im Haus: ohne Stock werten.
+        </div>
+      )}
 
       {stones.length > 0 && (
         <div style={card}>
@@ -756,9 +871,9 @@ function KehreScreen({ nameA, nameB, game, targetPoints, kehreScore, totalStones
           style={{ ...bigBtn("#e9e4d8", COLORS.brown), ...tile, fontSize: 16, gap: 6, opacity: stones.length === 0 ? 0.4 : 1 }}>
           <RotateCcw size={20} /> Zurück
         </button>
-        <button onClick={auswerten} disabled={stones.length === 0}
-          style={{ ...bigBtn(COLORS.green), ...tile, fontSize: 16, gap: 6, opacity: stones.length === 0 ? 0.4 : 1 }}>
-          <Check size={20} /> Kehre werten
+        <button onClick={auswerten} disabled={!darfWerten}
+          style={{ ...bigBtn(COLORS.green), ...tile, fontSize: 16, gap: 6, opacity: darfWerten ? 1 : 0.4 }}>
+          <Check size={20} /> {stones.length === 0 ? "Kehre ohne Punkte" : "Kehre werten"}
         </button>
       </div>
 
@@ -814,18 +929,28 @@ function KehreScreen({ nameA, nameB, game, targetPoints, kehreScore, totalStones
   );
 }
 
-function Scoreboard({ name, color, kp, target, raw }) {
+function Scoreboard({ name, color, kp, target, raw, modus }) {
   return (
     <div style={{ height: 110, width: "100%", boxSizing: "border-box", minWidth: 0, background: color, borderRadius: 20, padding: "10px", textAlign: "center", color: color === COLORS.gold ? COLORS.brown : "#fff", display: "flex", flexDirection: "column", justifyContent: "center" }}>
       <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
-      <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1 }}>{kp}<span style={{ fontSize: 15, opacity: 0.7 }}> / {target}</span></div>
-      <div style={{ fontSize: 22, fontWeight: 800, opacity: 0.9 }}>{raw} <span style={{ fontSize: 13, fontWeight: 600, opacity: 0.75 }}>/ 9</span></div>
+      {modus === "olympisch" ? (
+        <>
+          <div style={{ fontSize: 30, fontWeight: 900, lineHeight: 1.1 }}>{raw}<span style={{ fontSize: 13, fontWeight: 600, opacity: 0.75 }}> Stockpunkte</span></div>
+          <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85 }}>{kp} {kp === 1 ? "Kehre" : "Kehren"} gewonnen</div>
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1 }}>{kp}<span style={{ fontSize: 15, opacity: 0.7 }}> / {target}</span></div>
+          <div style={{ fontSize: 22, fontWeight: 800, opacity: 0.9 }}>{raw} <span style={{ fontSize: 13, fontWeight: 600, opacity: 0.75 }}>/ 9</span></div>
+        </>
+      )}
     </div>
   );
 }
 
-function EndeScreen({ nameA, nameB, kp, winner, auto, card, bigBtn, onNeu, onKorrigieren }) {
+function EndeScreen({ nameA, nameB, kp, olympisch, kehren, winner, auto, card, bigBtn, onNeu, onKorrigieren }) {
   const winnerName = winner === "A" ? nameA : winner === "B" ? nameB : null;
+  const spiel = spielpunkte(winner);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, alignItems: "center", textAlign: "center", paddingTop: 20 }}>
       <Trophy size={54} color={COLORS.gold} />
@@ -833,6 +958,7 @@ function EndeScreen({ nameA, nameB, kp, winner, auto, card, bigBtn, onNeu, onKor
         {winnerName ? `${winnerName} gewinnt!` : "Unentschieden"}
       </div>
       <div style={{ ...card, width: "100%", boxSizing: "border-box" }}>
+        {olympisch && <div style={{ fontSize: 12, fontWeight: 800, color: "#7a6a5a", marginBottom: 6, letterSpacing: 0.5 }}>STOCKPUNKTE</div>}
         <div style={{ display: "flex", justifyContent: "space-around" }}>
           <div>
             <div style={{ fontWeight: 700, color: COLORS.brown }}>{nameA}</div>
@@ -843,6 +969,14 @@ function EndeScreen({ nameA, nameB, kp, winner, auto, card, bigBtn, onNeu, onKor
             <div style={{ fontSize: 32, fontWeight: 900, color: COLORS.purple }}>{kp.B}</div>
           </div>
         </div>
+        {olympisch && (
+          <div style={{ marginTop: 14, fontSize: 15, fontWeight: 800, color: COLORS.brown }}>
+            Spielpunkte {spiel.A} : {spiel.B}
+            {winner === "unentschieden" && (
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#7a6a5a", marginTop: 4 }}>Gewonnene Kehren {kehren.A} : {kehren.B}</div>
+            )}
+          </div>
+        )}
       </div>
       <button onClick={onNeu} style={{ ...bigBtn(COLORS.green), width: "100%" }}>Neues Match</button>
       <button onClick={onKorrigieren} style={{ border: `2px solid ${COLORS.brown}`, background: "transparent", color: COLORS.brown, borderRadius: 16, padding: "14px 10px", fontSize: 15, fontWeight: 800, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, touchAction: "manipulation" }}>
@@ -882,7 +1016,7 @@ function VerlaufScreen({ matchHistory, card, bigBtn, confirmDeleteId, setConfirm
                 <div style={{ fontWeight: 800, color: COLORS.brown, fontSize: 15 }}>
                   {m.sieger ? `${m.sieger} hat ${m.scoreA}:${m.scoreB} gewonnen` : `Unentschieden ${m.scoreA}:${m.scoreB}`}
                 </div>
-                <div style={{ fontSize: 12, color: "#999" }}>{m.teamA} vs. {m.teamB}</div>
+                <div style={{ fontSize: 12, color: "#999" }}>{m.teamA} vs. {m.teamB}{modusText(m) ? ` · ${modusText(m)}` : ""}</div>
               </div>
               <button onClick={() => setConfirmDeleteId(m.id)} aria-label="Match löschen" style={{ border: "none", background: "#f2f2f2", borderRadius: 10, width: 38, height: 38, color: "#a33", flexShrink: 0 }}>
                 <Trash2 size={18} />
