@@ -1,3 +1,4 @@
+// Stockheil App.jsx, Stand 02.11.2026 21:58: Olympisch/Wild, Spielart im Setup, fester Fertig-Button, leere Matches werden verworfen
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Shuffle, RotateCcw, Check, Trophy, Flag, Plus, Minus, X, Trash2, History, Lock, Unlock, Settings, Undo2, Share2 } from "lucide-react";
 import { APP_URL, QR_SIZE, QR_PATH } from "./qr.js";
@@ -276,6 +277,11 @@ export default function Stockheil() {
   }
 
   function beendeManuell() {
+    // Noch keine Kehre gewertet: Match verwerfen, kein Eintrag im Verlauf
+    if (snapshots.length === 0) {
+      neuesMatch();
+      return;
+    }
     const { A, B } = modus === "olympisch" ? game.raw : game.kp;
     const winner = A === B ? "unentschieden" : A > B ? "A" : "B";
     const id = Date.now();
@@ -700,7 +706,10 @@ function SetupScreen({ modus, setModus, variante, setVariante, kehrenZahl, setKe
 
       <ShareCard card={card} bigBtn={bigBtn} sectionTitle={sectionTitle} />
 
-      <button onClick={onFertig} style={{ ...bigBtn(COLORS.green), width: "100%" }}>Fertig</button>
+      {/* Bleibt beim Scrollen am unteren Rand sichtbar */}
+      <div style={{ position: "sticky", bottom: 0, zIndex: 5, margin: "0 -16px -16px", padding: "14px 16px calc(16px + env(safe-area-inset-bottom))", background: `linear-gradient(to top, ${COLORS.cream} 70%, rgba(250,246,236,0))` }}>
+        <button onClick={onFertig} style={{ ...bigBtn(COLORS.green), width: "100%" }}>Fertig</button>
+      </div>
     </div>
   );
 }
@@ -873,7 +882,7 @@ function KehreScreen({ modus, kehrenZahl, nameA, nameB, game, targetPoints, kehr
         </button>
         <button onClick={auswerten} disabled={!darfWerten}
           style={{ ...bigBtn(COLORS.green), ...tile, fontSize: 16, gap: 6, opacity: darfWerten ? 1 : 0.4 }}>
-          <Check size={20} /> {stones.length === 0 ? "Kehre ohne Punkte" : "Kehre werten"}
+          <Check size={20} /> {modus === "olympisch" && stones.length === 0 ? "Kehre ohne Punkte" : "Kehre werten"}
         </button>
       </div>
 
