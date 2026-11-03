@@ -1,4 +1,4 @@
-// Stockheil App.jsx, Stand 03.11.2026 21:35: Olympisch/Wild, Spielart im Setup, fester Fertig-Button, leere Matches werden verworfen, 6-9-Punkt (6 nur bei 0, sonst 3; Kehrenpunkt erst über 9)
+// Stockheil App.jsx, Stand 03.11.2026 22:00: Olympisch/Wild, Spielart im Setup, fester Fertig-Button, leere Matches werden verworfen, 6-9-Punkt (6 nur bei 0, sonst 3; Kehrenpunkt erst über 9)
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Shuffle, RotateCcw, Check, Trophy, Flag, Plus, Minus, X, Trash2, History, Lock, Unlock, Settings, Undo2, Share2 } from "lucide-react";
 import { APP_URL, QR_SIZE, QR_PATH } from "./qr.js";
@@ -572,6 +572,14 @@ function SpielartCard({ modus, setModus, variante, setVariante, card }) {
     color: aktiv ? "#fff" : COLORS.brown,
     borderRadius: 999, padding: "10px 16px", fontSize: 15, fontWeight: 800, touchAction: "manipulation",
   });
+  // Wild-Varianten: alle in einer Zeile, gelb, die gewählte violett
+  const varianteChip = (aktiv) => ({
+    flex: "1 1 0", minWidth: 0, whiteSpace: "nowrap",
+    border: `1px solid ${aktiv ? COLORS.purple : COLORS.gold}`,
+    background: aktiv ? COLORS.purple : COLORS.gold,
+    color: aktiv ? "#fff" : COLORS.brown,
+    borderRadius: 999, padding: "10px 4px", fontSize: 14, fontWeight: 800, touchAction: "manipulation",
+  });
   return (
     <div style={{ ...card, borderTop: `5px solid ${COLORS.green}` }}>
       <div style={{ fontSize: 12, fontWeight: 800, color: "#7a6a5a", marginBottom: 8, letterSpacing: 0.5 }}>SPIELART</div>
@@ -580,9 +588,9 @@ function SpielartCard({ modus, setModus, variante, setVariante, card }) {
         <button onClick={() => setModus("wild")} style={chip(modus === "wild")}>Wild</button>
       </div>
       {modus === "wild" && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+        <div style={{ display: "flex", flexWrap: "nowrap", gap: 6, marginTop: 10 }}>
           {Object.keys(WILD_VARIANTEN).map((key) => (
-            <button key={key} onClick={() => setVariante(key)} style={chip(variante === key)}>{key}</button>
+            <button key={key} onClick={() => setVariante(key)} style={varianteChip(variante === key)}>{key}</button>
           ))}
         </div>
       )}
