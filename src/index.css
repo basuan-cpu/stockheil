@@ -109,3 +109,23 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* Keine Textmarkierung in der ganzen App (auch nicht auf deaktivierten Buttons) */
+#root,
+button {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+/* Eingabefelder bleiben normal bedienbar */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
