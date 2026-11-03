@@ -1,4 +1,4 @@
-// Stockheil App.jsx, Stand 03.11.2026 20:50: Olympisch/Wild, Spielart im Setup, fester Fertig-Button, leere Matches werden verworfen, 6-9-Punkt (6, 3, 3; Kehrenpunkt erst über 9)
+// Stockheil App.jsx, Stand 03.11.2026 21:35: Olympisch/Wild, Spielart im Setup, fester Fertig-Button, leere Matches werden verworfen, 6-9-Punkt (6 nur bei 0, sonst 3; Kehrenpunkt erst über 9)
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Shuffle, RotateCcw, Check, Trophy, Flag, Plus, Minus, X, Trash2, History, Lock, Unlock, Settings, Undo2, Share2 } from "lucide-react";
 import { APP_URL, QR_SIZE, QR_PATH } from "./qr.js";
@@ -33,7 +33,7 @@ const WILD_ZIEL = 9;
 const WILD_VARIANTEN = {
   "3-6-9": { steps: [3, 3, 3], punktAb: 9, text: "Nächster Stock 3, zweiter 6, dritter 9 Punkte. Bei 9 gibt es einen Kehrenpunkt, danach beginnen beide wieder bei 0." },
   "3-2-2-2": { steps: [3, 2, 2, 2], punktAb: 9, text: "Nächster Stock 3, jeder weitere 2 dazu (3, 5, 7, 9). Für die 9 braucht es vier Stöcke. Bei 9 gibt es einen Kehrenpunkt, danach beginnen beide wieder bei 0." },
-  "6-9-Punkt": { steps: [6, 3, 3, 3, 3, 3], punktAb: 10, text: "Nächster Stock 6, jeder weitere 3 Punkte (6, 9, 12). Bei 9 ist es noch nicht aus: Für den Kehrenpunkt braucht es mehr als 9, also drei Stöcke. Danach beginnen beide wieder bei 0." },
+  "6-9-Punkt": { steps: [6, 3, 3, 3, 3, 3], folge: [3, 3, 3, 3, 3, 3], punktAb: 10, text: "Nur der erste Stock zählt 6 und nur, wenn die Moarschaft bei 0 beginnt (6, 9, 12). Hat sie schon Punkte gesammelt, zählt jeder Stock 3. Bei 9 ist es noch nicht aus: Für den Kehrenpunkt braucht es mehr als 9. Danach beginnen beide wieder bei 0." },
 };
 const STANDARD_VARIANTE = "3-6-9";
 const wildVariante = (v) => WILD_VARIANTEN[v] || WILD_VARIANTEN[STANDARD_VARIANTE];
@@ -54,7 +54,10 @@ function bewerteKehre({ stones, raw, modus, variante, stonesPerTeam }) {
     maxCountable = stonesPerTeam;
     pts = Math.min(count, maxCountable);
   } else {
-    const { steps, punktAb } = wildVariante(variante);
+    const v = wildVariante(variante);
+    // folge: Stufen für eine Moarschaft, die schon Punkte gesammelt hat (6-9-Punkt: dann zählt jeder Stock 3)
+    const steps = v.folge && raw[first] > 0 ? v.folge : v.steps;
+    const punktAb = v.punktAb;
     maxCountable = Math.min(steps.length, stonesPerTeam);
     pts = steps.slice(0, Math.min(count, maxCountable)).reduce((sum, st) => sum + st, 0);
     reichtSchon = raw[first] + pts >= punktAb;
