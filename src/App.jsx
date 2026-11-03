@@ -1,4 +1,4 @@
-// Stockheil App.jsx, Stand 02.11.2026 21:58: Olympisch/Wild, Spielart im Setup, fester Fertig-Button, leere Matches werden verworfen
+// Stockheil App.jsx, Stand 03.11.2026 20:40: Olympisch/Wild, Spielart im Setup, fester Fertig-Button, leere Matches werden verworfen, 6-9-Punkt (6, 3, 3; Kehrenpunkt erst über 9)
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Shuffle, RotateCcw, Check, Trophy, Flag, Plus, Minus, X, Trash2, History, Lock, Unlock, Settings, Undo2, Share2 } from "lucide-react";
 import { APP_URL, QR_SIZE, QR_PATH } from "./qr.js";
@@ -25,16 +25,18 @@ const STORAGE_PREFIX = "stockheil:";
 // ununterbrochene Serie einer Moarschaft ab dem nächsten Stock.
 //
 // Wild: Jede Stufe der Serie bringt ihren Wert (steps). Die Punkte werden über die Kehren gesammelt.
-//       Bei 9 gibt es einen Kehrenpunkt, danach beginnen beide Moarschaften wieder bei 0.
+//       Ab punktAb gibt es einen Kehrenpunkt (3-6-9 und 3-2-2-2 bei 9, 6-9-Punkt erst über 9),
+//       danach beginnen beide Moarschaften wieder bei 0.
 // Olympisch (IER 451/452): Jeder Stock der Serie zählt 1 Punkt, die Stockpunkte werden über alle
 //       Kehren summiert. Spielpunkte: Sieg 2:0, Unentschieden 1:1 (IER 454).
 const WILD_ZIEL = 9;
 const WILD_VARIANTEN = {
-  "3-6-9": { steps: [3, 3, 3], text: "Nächster Stock 3, zweiter 6, dritter 9 Punkte." },
-  "3-2-2-2": { steps: [3, 2, 2, 2], text: "Nächster Stock 3, jeder weitere 2 dazu (3, 5, 7, 9). Für die 9 braucht es vier Stöcke." },
-  "6-9": { steps: [6, 3], text: "Nächster Stock 6, zweiter 9 Punkte." },
+  "3-6-9": { steps: [3, 3, 3], punktAb: 9, text: "Nächster Stock 3, zweiter 6, dritter 9 Punkte. Bei 9 gibt es einen Kehrenpunkt, danach beginnen beide wieder bei 0." },
+  "3-2-2-2": { steps: [3, 2, 2, 2], punktAb: 9, text: "Nächster Stock 3, jeder weitere 2 dazu (3, 5, 7, 9). Für die 9 braucht es vier Stöcke. Bei 9 gibt es einen Kehrenpunkt, danach beginnen beide wieder bei 0." },
+  "6-9-Punkt": { steps: [6, 3, 3], punktAb: 10, text: "Nächster Stock 6, zweiter 3, dritter 3 Punkte (6, 9, 12). Bei 9 ist es noch nicht aus: Für den Kehrenpunkt braucht es mehr als 9, also drei Stöcke. Danach beginnen beide wieder bei 0." },
 };
 const STANDARD_VARIANTE = "3-6-9";
+const wildVariante = (v) => WILD_VARIANTEN[v] || WILD_VARIANTEN[STANDARD_VARIANTE];
 
 function bewerteKehre({ stones, raw, modus, variante, stonesPerTeam }) {
   if (stones.length === 0) return { A: 0, B: 0, complete: false };
@@ -52,10 +54,10 @@ function bewerteKehre({ stones, raw, modus, variante, stonesPerTeam }) {
     maxCountable = stonesPerTeam;
     pts = Math.min(count, maxCountable);
   } else {
-    const steps = (WILD_VARIANTEN[variante] || WILD_VARIANTEN[STANDARD_VARIANTE]).steps;
+    const { steps, punktAb } = wildVariante(variante);
     maxCountable = Math.min(steps.length, stonesPerTeam);
     pts = steps.slice(0, Math.min(count, maxCountable)).reduce((sum, st) => sum + st, 0);
-    reichtSchon = raw[first] + pts >= WILD_ZIEL;
+    reichtSchon = raw[first] + pts >= punktAb;
   }
   const broken = stones.length > count;
   const capped = count >= maxCountable;
@@ -70,7 +72,7 @@ function bewerteKehre({ stones, raw, modus, variante, stonesPerTeam }) {
 // Wertet eine fertige Kehre in den Spielstand ein. Rückgabe: neuer Stand und Sieger (null = läuft weiter).
 // Stand: raw = Wild: laufende Punkte Richtung 9 / Olympisch: Stockpunkte gesamt
 //        kp  = Wild: Kehrenpunkte / Olympisch: gewonnene Kehren
-function wendeKehreAn({ game, kehre, modus, targetPoints, kehrenZahl }) {
+function wendeKehreAn({ game, kehre, modus, variante, targetPoints, kehrenZahl }) {
   const raw = { A: game.raw.A + kehre.A, B: game.raw.B + kehre.B };
   const kp = { ...game.kp };
   let winner = null;
@@ -81,8 +83,9 @@ function wendeKehreAn({ game, kehre, modus, targetPoints, kehrenZahl }) {
     return { game: { kehreNr: game.kehreNr + 1, raw, kp, stones: [] }, winner };
   }
   let punktErreicht = false;
+  const punktAb = wildVariante(variante).punktAb;
   ["A", "B"].forEach((t) => {
-    if (raw[t] >= WILD_ZIEL) {
+    if (raw[t] >= punktAb) {
       kp[t] += 1;
       punktErreicht = true;
       raw.A = 0;
@@ -203,7 +206,7 @@ export default function Stockheil() {
   const [stonesPerTeam, setStonesPerTeam] = usePersistentState("stonesPerTeam", 4);
   const [targetPoints, setTargetPoints] = usePersistentState("targetPoints", 6);
   const [modus, setModus] = usePersistentState("modus", "wild", (m) => (m === "olympisch" ? "olympisch" : "wild"));
-  const [variante, setVariante] = usePersistentState("variante", STANDARD_VARIANTE, (v) => (typeof v === "string" && Object.prototype.hasOwnProperty.call(WILD_VARIANTEN, v) ? v : STANDARD_VARIANTE));
+  const [variante, setVariante] = usePersistentState("variante", STANDARD_VARIANTE, (v) => { const n = v === "6-9" ? "6-9-Punkt" : v; return typeof n === "string" && Object.prototype.hasOwnProperty.call(WILD_VARIANTEN, n) ? n : STANDARD_VARIANTE; });
   const [kehrenZahl, setKehrenZahl] = usePersistentState("kehrenZahl", 6, (n) => (Number.isInteger(n) && n >= 2 && n <= 12 && n % 2 === 0 ? n : 6));
 
   const [game, setGame] = usePersistentState("game", INITIAL_GAME);
@@ -257,7 +260,7 @@ export default function Stockheil() {
   }
 
   function auswerten() {
-    const { game: neuerStand, winner } = wendeKehreAn({ game, kehre: kehreScore, modus, targetPoints, kehrenZahl });
+    const { game: neuerStand, winner } = wendeKehreAn({ game, kehre: kehreScore, modus, variante, targetPoints, kehrenZahl });
     // Stand vor dieser Wertung merken, damit sie korrigiert werden kann
     setSnapshots([...snapshots, game]);
     setGame(neuerStand);
@@ -431,7 +434,7 @@ export default function Stockheil() {
 
         {activeScreen === "kehre" && (
           <KehreScreen
-            {...{ modus, kehrenZahl, nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, card, bigBtn }}
+            {...{ modus, variante, kehrenZahl, nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, card, bigBtn }}
             kannKorrigieren={snapshots.length > 0}
             addStone={addStone}
             undoStone={undoStone}
@@ -583,7 +586,7 @@ function SpielartCard({ modus, setModus, variante, setVariante, card }) {
       <div style={{ fontSize: 13, color: "#7a6a5a", marginTop: 10, lineHeight: 1.45 }}>
         {modus === "olympisch"
           ? "Jeder Stock, der näher liegt als der beste gegnerische, zählt 1 Punkt. Nach allen Kehren gewinnt, wer mehr Stockpunkte hat (2 Spielpunkte, bei Gleichstand je 1)."
-          : `${WILD_VARIANTEN[variante].text} Bei 9 gibt es einen Kehrenpunkt, danach beginnen beide wieder bei 0.`}
+          : WILD_VARIANTEN[variante].text}
       </div>
     </div>
   );
@@ -828,18 +831,19 @@ function Stepper({ label, value, setValue, min, max, step = 1 }) {
   );
 }
 
-function KehreScreen({ modus, kehrenZahl, nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, kannKorrigieren, addStone, undoStone, auswerten, korrigiereLetzteKehre, beendeManuell, card, bigBtn }) {
+function KehreScreen({ modus, variante, kehrenZahl, nameA, nameB, game, targetPoints, kehreScore, totalStones, displayStatus, kannKorrigieren, addStone, undoStone, auswerten, korrigiereLetzteKehre, beendeManuell, card, bigBtn }) {
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [qrOffen, setQrOffen] = useState(false);
   const stones = game.stones;
   const darfWerten = stones.length > 0 || modus === "olympisch";
+  const limit = modus === "wild" && wildVariante(variante).punktAb > WILD_ZIEL ? "über 9" : "9";
   const tile = { height: 110, width: "100%", boxSizing: "border-box", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, width: "100%" }}>
-        <Scoreboard name={nameA} color={COLORS.gold} kp={game.kp.A} target={targetPoints} raw={game.raw.A} modus={modus} />
-        <Scoreboard name={nameB} color={COLORS.purple} kp={game.kp.B} target={targetPoints} raw={game.raw.B} modus={modus} />
+        <Scoreboard name={nameA} color={COLORS.gold} kp={game.kp.A} target={targetPoints} raw={game.raw.A} modus={modus} limit={limit} />
+        <Scoreboard name={nameB} color={COLORS.purple} kp={game.kp.B} target={targetPoints} raw={game.raw.B} modus={modus} limit={limit} />
       </div>
 
       <div style={{ textAlign: "center", color: COLORS.brown, fontWeight: 800, fontSize: 15 }}>
@@ -938,7 +942,7 @@ function KehreScreen({ modus, kehrenZahl, nameA, nameB, game, targetPoints, kehr
   );
 }
 
-function Scoreboard({ name, color, kp, target, raw, modus }) {
+function Scoreboard({ name, color, kp, target, raw, modus, limit = "9" }) {
   return (
     <div style={{ height: 110, width: "100%", boxSizing: "border-box", minWidth: 0, background: color, borderRadius: 20, padding: "10px", textAlign: "center", color: color === COLORS.gold ? COLORS.brown : "#fff", display: "flex", flexDirection: "column", justifyContent: "center" }}>
       <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
@@ -950,7 +954,7 @@ function Scoreboard({ name, color, kp, target, raw, modus }) {
       ) : (
         <>
           <div style={{ fontSize: 26, fontWeight: 900, lineHeight: 1.1 }}>{kp}<span style={{ fontSize: 15, opacity: 0.7 }}> / {target}</span></div>
-          <div style={{ fontSize: 22, fontWeight: 800, opacity: 0.9 }}>{raw} <span style={{ fontSize: 13, fontWeight: 600, opacity: 0.75 }}>/ 9</span></div>
+          <div style={{ fontSize: 22, fontWeight: 800, opacity: 0.9 }}>{raw} <span style={{ fontSize: 13, fontWeight: 600, opacity: 0.75 }}>/ {limit}</span></div>
         </>
       )}
     </div>
